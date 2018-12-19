@@ -21,7 +21,7 @@ Description		-
 #define OP_OR  3
 #define OP_SLL 4
 #define OP_SRA 5
-#define OP_RSRV 6 //Unused Opcode
+#define OP_RSRV 6				//Unused Opcode
 #define OP_BEQ 7
 #define OP_BGT 8
 #define OP_BLE 9
@@ -29,7 +29,7 @@ Description		-
 #define OP_JAL 11
 #define OP_LW  12
 #define OP_SW  13
-#define OP_LHI 14  //R[rd][bits 31:16] = R[rs][low bits 15:0]
+#define OP_LHI 14				//R[rd][bits 31:16] = R[rs][low bits 15:0]
 #define OP_HALT 15
 
 // registers 
@@ -50,44 +50,34 @@ Description		-
 #define $fp 14  
 #define $ra 15
 
-// main memory memory size
-#define MEM_SIZE (1 << 16)
+
+#define MEM_SIZE (1 << 12)		// main memory memory size 4096 words
 
 // Global Variables ------------------------------------------------------------
+	
+int mem[MEM_SIZE];				// main memory
+float R[] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};		//Represent X16 32 bit single precision float Registers
+
+typedef struct instruction{
+	long int raw_inst;			// 8 hex instruction
+	int opp;					// oppcode
+	int dst;					// destination register
+	int src0;					// source 0 register
+	int src1;					// source 1 register
+	int imm;					// immediate value
+	int pc;						// instruction pc value
+	int unit;					// number of handling functional unit. The type of the FU is already given by the opp field.
+	int stage_cycle[4];			// Cycle log: cycle issued, cycle read operands, cycle execute end, cycle write result
+}inst_data;
+
+typedef struct scoreboard{
+	
+
+
+}sb;
+
 
 // Function Declarations -------------------------------------------------------
-
-
-// extract multiple bits
-static inline int bitSel(int x, int msb, int lsb)
-{
-	if (msb == 31 && lsb == 0)
-		return x;
-	return (x >> lsb) & ((1 << (msb - lsb + 1)) - 1);
-}
-
-//arithmetic shift right (sra command)
-static int ArithmetiShiftRight(int n, int numForShift) {
-	if ((n & 0x80000000) == 0x80000000) {
-		for (int i = 0; i < numForShift; i++)
-		{
-			n = n >> 1;
-			n = n | 0x80000000;
-		}
-	}
-	else
-	{
-		n = n >> numForShift;
-	}
-	return n;
-}
-
-//sign extend 16 bit to 32 bit
-static int signExtension(int n) {
-	int value = (0x0000FFFF & n);
-	int mask = 0x00008000;
-	if (mask & n) {
-		value += 0xFFFF0000;
-	}
-	return value;
-}
+static inline int bitSel(int x, int msb, int lsb);
+static int ArithmetiShiftRight(int n, int numForShift);
+static int signExtension(int n);

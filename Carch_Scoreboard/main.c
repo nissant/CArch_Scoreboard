@@ -8,29 +8,20 @@ Description		-
 
 int main(int argc, char *argv[])
 {
-	// main memory
-	long int R[] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };	//Represent X16 32 BIT SIMPS Registers
-	int mem[MEM_SIZE];
+	
+	// check that we have all cmd line arguments passed
+	if (argc != 6) {
+		printf("sim.exe cfg.txt memin.txt memout.txt regout.txt traceinst.txt traceunit.txt\n");
+		exit(1);
+	}
 
-	int i, last;
-	int inst, op, rd, rs, rt, imm, PC;
-	int count = 0;
-	bool endBool = false;
-	bool PCFlag = false;
-	bool IMMflag = false;
-
-	// files
+	// Open files files
 	FILE *fp_memin = fopen(argv[1], "rt");
 	FILE *fp_memout = fopen(argv[2], "wt");
 	FILE *fp_regout = fopen(argv[3], "wt");
 	FILE *fp_trace = fopen(argv[4], "wt");
 	FILE *fp_count = fopen(argv[5], "wt");
 
-	// check that we have all cmd line arguments passed
-	if (argc != 6) {
-		printf("usage: sim.exe memin.txt memout.txt regout.txt trace.txt count.txt\n");
-		exit(1);
-	}
 
 	// check if the files opened
 	if (!fp_memin || !fp_memout || !fp_count || !fp_regout || !fp_trace) {
@@ -40,6 +31,14 @@ int main(int argc, char *argv[])
 
 	// zero memory
 	memset(mem, 0, MEM_SIZE * sizeof(int));
+
+	int i, last;
+	int inst, op, rd, rs, rt, imm, PC;
+	int count = 0;
+	bool endBool = false;
+	bool PCFlag = false;
+	bool IMMflag = false;
+
 
 	// read memin.txt into mem
 	i = 0;
