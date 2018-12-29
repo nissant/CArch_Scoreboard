@@ -8,17 +8,15 @@ Description		-
 
 int main(int argc, char *argv[])
 {
-	int i, last_line;
-	int count = 0;
-	int inst, op, rd, rs, rt, imm, pc, cc;
+	int last_line,ret=0;
+	unsigned int cc,pc;
 	bool haltFlag = false;
 
-	// check that we have all cmd line arguments passed
-	if (argc != 6) {
+	// check that we have all cmd line arguments passed - cfg.txt memin.txt memout.txt regout.txt traceinst.txt traceunit.txt
+	if (argc != 7) {
 		printf("ERROR: Wrong command line usage (cfg.txt memin.txt memout.txt regout.txt traceinst.txt traceunit.txt) \n");
 		exit(1);
 	}
-
 	// Open files files
 	FILE *fp_config = fopen(argv[1], "rt");
 	FILE *fp_memin = fopen(argv[2], "rt");
@@ -26,31 +24,39 @@ int main(int argc, char *argv[])
 	FILE *fp_regout = fopen(argv[4], "wt");
 	FILE *fp_trace_inst = fopen(argv[5], "wt");
 	FILE *fp_truce_unit = fopen(argv[6], "wt");
-
 	// Check if the files opened
 	if (!fp_memin || !fp_memout || !fp_trace_inst || !fp_regout || !fp_trace_inst || !fp_config) {
 		printf("ERROR: Failed to open files stream \n");
-		exit(1);
+		ret = 1;
+		goto cleanup;
 	}
-
-	read_mem(fp_memin, &last_line);		// Read memin.txt into mem and find last non-zero memory entry
-
-	read_config(fp_config);				// Read cfg.txt and updated scoreboard
-	
-	cc = 0;
+	// Read memin.txt into mem and find last non-zero memory entry
+	read_mem(fp_memin, &last_line);	
+	// Read cfg.txt and updated scoreboard
+	if (read_config(fp_config) != 0) {		
+		printf("ERROR: Failed read configuration file, check syntax and that all lines are presrnt\n");
+		ret = 1;
+		goto cleanup;
+	}
+	// Init scoreboard
+	if (scoreboard_init() != 0) {
+		printf("ERROR: Failed read configuration file, check syntax and that all lines are presrnt\n");
+		ret = 1;
+		goto cleanup;
+	}
 	pc = 0;
+	cc = 0;
 	while (pc <= last_line && !haltFlag) {
-		
-		// Fetch next instruction into instruction queie
-			// if
-			//inst = mem[PC];
-			//PC++;
-		// scoreboard_clk();
-		// Write to fiels
-		// Copy next cycle data structures
-		// CC++
+		fetch_inst(&pc);	// Fetch next instruction into instruction queue
+		scoreboard_clk(cc, &haltFlag, fp_trace_inst, fp_truce_unit);		// Clock the scoreboard
+		scoreboard_update();
+		cc++; // incrament clock
 	}
-
+	 
+	// Write to memout.txt and regout.txt
+	print_memouot_regout(fp_memout, fp_regout);
+	
+cleanup:
 	// close files
 	fclose(fp_config);
 	fclose(fp_memin);
@@ -58,8 +64,7 @@ int main(int argc, char *argv[])
 	fclose(fp_regout);
 	fclose(fp_trace_inst);
 	fclose(fp_truce_unit);
-
-	return 0;
+	return ret;
 }
 
 
@@ -211,26 +216,4 @@ IMMflag = false;
 count++;
 */
 
-/*
-// count the max row number of memout file.
-last = MEM_SIZE - 1;
-while (last >= 0 && mem[last] == 0)
-	last--;
-
-// print on memout file.
-for (i = 0; i <= last + 1; i++)
-{
-	fprintf(fp_memout, "%04X\n", mem[i]);
-}
-
-// print on regout file.
-for (i = 2; i < 16; i++)
-{
-	fprintf(fp_regout, "%08X\n", R[i]);
-}
-
-//print on count file the number of actions.
-fprintf(fp_count, "%d", count);
-
-*/
 
