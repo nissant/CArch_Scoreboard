@@ -47,10 +47,12 @@ int main(int argc, char *argv[])
 
 	pc = 0;
 	cc = 0;
-	while (!exitFlag) {
+	while (!exitFlag) { // pc<= last_line && 
 		scoreboard_clk(cc, &exitFlag, fp_trace_inst, fp_truce_unit);		// Clock the scoreboard, this happens in raising clock edge
 		fetch_inst(&pc);													// Fetch next instruction into buffer and incrament pc, this happens in raising clock edge
-		scoreboard_update();
+		scoreboard_update();												// Pass end of cycle updates to scoreboard
+		// TODO - Print selected unit trace if is currently busy: cycle unit Fi Fj Fk Qj Qk Rj Rk
+		// TODO - Check if top instruction has graduated, if true print it's trace and dequeue
 		cc++;																// incrament clock cycle
 	}
 	// Write to memout.txt and regout.txt

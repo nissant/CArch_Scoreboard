@@ -6,7 +6,7 @@ Description		-
 
 #include "scoreboard.h"
 float regs[] = { 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 };					//Represent X16 32 bit single precision float Registers	
-char *fu_names[UNIT_NAME_SIZE] = { "LD","ST","ADD","SUB","MUL","DIV" };		// FU names, index corresponds to opcode number
+char *fu_names[FU_TYPES] = { "LD","ST","ADD","SUB","MUL","DIV" };		// FU names, index corresponds to opcode number
 bool haltFlag = false;														// Signal that hald line has been read
 				   
 
@@ -238,7 +238,7 @@ void fetch_inst(unsigned int *pc) {
 		new_inst.pc = *pc;
 		new_inst.stage_cycle[ISSUE] = -1;
 		new_inst.stage_cycle[READ_OP] = -1;
-		new_inst.stage_cycle[EXEC] = -1;
+		new_inst.stage_cycle[EXEC_END] = -1;
 		new_inst.stage_cycle[WRITE_RES] = -1;
 		enqueue(buffer, new_inst);
 		*pc = *pc + 1;
@@ -246,13 +246,16 @@ void fetch_inst(unsigned int *pc) {
 	return;
 }
 
-void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FILE *fp_truce_unit) {
+void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FILE *fp_trace_unit) {
+	// TODO - Concider implememnting the issued instructions list in a dynmically allocated array instead of queue....
 	inst_status next_inst;
 	unsigned int free_fu;
+	int i, n;
+
+	// Issue
 
 	// Try to issue one instruction as long as halt flag is not raised and instruction present in buffer
-	// Check if possible to issue instruction or if halt opperation
-	if (isEmpty(buffer) == false && haltFlag==false) {
+	if (isEmpty(buffer) == false && haltFlag==false) {	// Check if possible to issue instruction or if halt opperation
 		next_inst = front(buffer);
 		parse_inst(&next_inst);
 		if (next_inst.opp == HALT_OP) {
@@ -272,12 +275,12 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 			}
 			sb_b.fu_array[next_inst.opp][free_fu].q_j = sb_a.reg_res_status[next_inst.src0];
 			sb_b.fu_array[next_inst.opp][free_fu].q_k = sb_a.reg_res_status[next_inst.src1];
-			if (sb_a.reg_res_status[next_inst.src0] == -1)
+			if (sb_a.reg_res_status[next_inst.src0] == -1)		// If no fu is assigned for writing to j source, it is assigned for read opperands stage
 				sb_b.fu_array[next_inst.opp][free_fu].r_j = true;
 			else
 				sb_b.fu_array[next_inst.opp][free_fu].r_j = false;
 
-			if (sb_a.reg_res_status[next_inst.src1] == -1)
+			if (sb_a.reg_res_status[next_inst.src1] == -1)		// If no fu is assigned for writing to k source, it is assigned for read opperands stage
 				sb_b.fu_array[next_inst.opp][free_fu].r_k = true;
 			else
 				sb_b.fu_array[next_inst.opp][free_fu].r_k = false;
@@ -293,12 +296,93 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 	// Check if any instructions currently issued
 	if (isEmpty(sb_a.issued_buffer)) {
 		if (haltFlag)
-			*exitFlag_ptr = true;	// Issue queue is empty and halt command has been read
+			*exitFlag_ptr = true;	// Issue queue is empty and halt flag has been raised
 		return;
 	}
 
+	// At this point, issued instruction are present in the scoreboard queue (begining of clock cycle - sb_a)
+	// Itterate over issued queue
+	for (n = 0; n < sb_a.issued_buffer->size; n++) {
+		i = (sb_a.issued_buffer->front + n) % sb_a.issued_buffer->capacity;
+		//printf("%X \n", sb_a.issued_buffer->inst_array[i].raw_inst);
+		next_inst = sb_a.issued_buffer->inst_array[i];
+		
+		if (next_inst.stage_cycle[READ_OP] == -1) {			// Instruction is waiting for READ_OP & Execution start stage
+			if (sb_a.fu_array[next_inst.opp][next_inst.issued_fu].r_j &&sb_a.fu_array[next_inst.opp][next_inst.issued_fu].r_k) {
+				sb_b.issued_buffer->inst_array[i].stage_cycle[READ_OP] = cc;						// log cycle
+				sb_b.fu_array[next_inst.opp][next_inst.issued_fu].r_j = false;						// log s.b
+				sb_b.fu_array[next_inst.opp][next_inst.issued_fu].r_k = false;						// log s.b
+				sb_b.fu_array[next_inst.opp][next_inst.issued_fu].result = execOpp(next_inst);		// get fu results
+				sb_b.fu_array[next_inst.opp][next_inst.issued_fu].remaining_cycles--;				// decrement cycle counter
+			}
+		}
+		else if (next_inst.stage_cycle[EXEC_END] == -1) {	// Instruction is waiting to finish execution stage
+			if (sb_b.fu_array[next_inst.opp][next_inst.issued_fu].remaining_cycles == 0) {
+				sb_b.issued_buffer->inst_array[i].stage_cycle[EXEC_END] = cc;						// log cycle
+			}
+			else {
+				sb_b.fu_array[next_inst.opp][next_inst.issued_fu].remaining_cycles--;				// decrement cycle counter
+			}
+		}
+		else if (next_inst.stage_cycle[WRITE_RES] == -1) {	// Instruction is waiting to write results and graduate
+			// Check conditions and write results
+			if (check_free2write_res(sb_a.fu_array[next_inst.opp][next_inst.issued_fu].fu_sn)) {
+				// Write results phase
+				sb_b.issued_buffer->inst_array[i].stage_cycle[WRITE_RES] = cc;
+				if (next_inst.opp == ST_OP) {
+					mem[next_inst.imm] = sb_a.fu_array[next_inst.opp][next_inst.issued_fu].result;
+				}
+				else {
+					regs[next_inst.dst] = sb_a.fu_array[next_inst.opp][next_inst.issued_fu].result;
+				}
+				// Update s.b clean up fu and reset fields
+				sb_b.fu_array[next_inst.opp][next_inst.issued_fu].busy = false;
+				sb_b.fu_array[next_inst.opp][next_inst.issued_fu].remaining_cycles = fu_const_data[next_inst.opp].delay_cycles;
+				sb_b.reg_res_status[next_inst.dst] = -1;
+				update_res_ready(sb_a.fu_array[next_inst.opp][next_inst.issued_fu].fu_sn);
+			}
+		}
+	}
 
-	
+	// Check if top instruction queue has graduated 
+	next_inst = front(sb_b.issued_buffer);
+	if (next_inst.stage_cycle[WRITE_RES] > -1) {
+		fprintf(fp_trace_inst, "%08X\n", next_inst.raw_inst);
+		dequeue(sb_b.issued_buffer);
+	}
+}
+
+void update_res_ready(int fu_sn) {
+	int i, j;
+	// Itterate over FU's 
+	for (i = 0; i < FU_TYPES; i++) {
+		for (j = 0; j < fu_const_data[i].available; j++) {
+			if (sb_a.fu_array[i][j].q_j == fu_sn) {
+				sb_b.fu_array[i][j].r_j == true;	// Update r_j
+				sb_b.fu_array[i][j].q_j = -1;		// Delete q_j
+			}
+			if (sb_a.fu_array[i][j].q_k == fu_sn) {
+				sb_b.fu_array[i][j].r_k == true;	// Update r_k
+				sb_b.fu_array[i][j].q_k = -1;		// Delete q_k
+			}
+		}
+	}
+}
+
+bool check_free2write_res(int fu_sn) {
+	int i, j;
+	// Itterate over FU's 
+	for (i = 0; i < FU_TYPES; i++) {
+		for (j = 0; j < fu_const_data[i].available; j++) {
+			if (sb_a.fu_array[i][j].q_j == fu_sn && sb_a.fu_array[i][j].r_j == true) {
+				return false;
+			}
+			if (sb_a.fu_array[i][j].q_k == fu_sn && sb_a.fu_array[i][j].r_k == true) {
+				return false;
+			}
+		}
+	}
+	return true;
 }
 
 void parse_inst(inst_status *next_inst) {
@@ -309,6 +393,29 @@ void parse_inst(inst_status *next_inst) {
 	next_inst->src0 = bitSel(temp, 19, 16);
 	next_inst->src1 = bitSel(temp, 15, 12);
 	next_inst->imm = bitSel(temp, 11, 0);
+}
+
+float execOpp(inst_status next_inst) {
+	switch (next_inst.opp) {
+	case (LD_OP):	// F[DST] = MEM[IMM]
+		return (mem[next_inst.imm]);
+		break;
+	case (ST_OP):	// MEM[IMM] = F[SRC1]
+		return (regs[next_inst.src1]);
+		break;
+	case (ADD_OP):	// F[DST] = F[SRC0] + F[SRC1]
+		return (regs[next_inst.src0]+regs[next_inst.src1]);
+		break;
+	case (SUB_OP):	// F[DST] = F[SRC0] - F[SRC1]
+		return (regs[next_inst.src0] - regs[next_inst.src1]);
+		break;
+	case (MUL_OP):	// F[DST] = F[SRC0] * F[SRC1]
+		return (regs[next_inst.src0] * regs[next_inst.src1]);
+		break;
+	case (DIV_OP):	// F[DST] = F[SRC0] / F[SRC1]
+		return (regs[next_inst.src0] / regs[next_inst.src1]);
+		break;
+	}
 }
 
 bool availableFU(unsigned int opp,unsigned int *free_fu) {
@@ -336,7 +443,7 @@ if (IMMflag) {
 // output to trace file
 fprintf(fp_trace, "%08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X\n", PC, inst, R[0], R[$imm], R[2], R[3], R[4], R[5], R[6], R[7], R[8], R[9], R[10], R[11], R[12], R[13], R[14], R[15]);
 
-// execute command
+// EXEC_ENDute command
 switch (op)
 {
 
@@ -473,25 +580,22 @@ void scoreboard_update() {
 	int i;
 	// Update FU status
 	for (i = 0; i < FU_TYPES; i++) {
-		sb_a.fu_array[i] = sb_b.fu_array[i];
+		//sb_a.fu_array[i] = sb_b.fu_array[i];
+		memcpy(sb_a.fu_array[i], sb_b.fu_array[i], sizeof(fu_status));
 	}
-	
+
 	// Update instruction status in issue queue
 	sb_a.issued_buffer->capacity = sb_b.issued_buffer->capacity;
 	sb_a.issued_buffer->front = sb_b.issued_buffer->front;
 	sb_a.issued_buffer->rear = sb_b.issued_buffer->rear;
 	sb_a.issued_buffer->size = sb_b.issued_buffer->size;
-
 	for (i = 0; i < sb_b.issued_buffer->capacity; i++) {
 		sb_a.issued_buffer->inst_array[i] = sb_b.issued_buffer->inst_array[i];
 	}
-
-
 	// Update register results status
 	for (i = 0; i < REG_COUNT; i++) {
 		sb_a.reg_res_status[i] = sb_b.reg_res_status[i];
 	}
-
 }
 
 int scoreboard_init() {
@@ -508,6 +612,8 @@ int scoreboard_init() {
 		fu_count += fu_const_data[i].available;
 		// Freee all fu's of type i
 		for (j = 0; j < fu_const_data[i].available; j++) {
+			sb_a.fu_array[i][j].remaining_cycles = fu_const_data->delay_cycles;
+			sb_b.fu_array[i][j].remaining_cycles = fu_const_data->delay_cycles;
 			sb_a.fu_array[i][j].busy = false;
 			sb_b.fu_array[i][j].busy = false;
 			sb_a.fu_array[i][j].fu_sn = fu_sn;
