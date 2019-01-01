@@ -96,6 +96,8 @@ scoreboard sb_b;					// Hold scoreboard during end of clock cycle
 fu_data fu_const_data[FU_TYPES];	// Hold Fu data read from cfg file
 char *fu_names[FU_TYPES];			// Holds the functional unit constant names as strings
 char trace_unit[UNIT_NAME_SIZE];	// FU name + id input string for which we produce the trace file
+int trace_unit_opp;					// The opperation associated with the tace unit
+int trace_unit_index;				// The specific index of the trace unit
 bool haltFlag;						// Signal that hald line has been read
 
 // Function Declarations -------------------------------------------------------
@@ -105,6 +107,7 @@ int scoreboard_init();
 void scoreboard_free();
 float execOpp(inst_status next_inst);
 void update_res_ready(int fu_sn);
+void print_unit_trace(FILE *fp_trace_unit, unsigned int cc);
 bool check_free2write_res(int fu_sn);
 void fetch_inst(unsigned int *pc);
 bool availableFU(unsigned int opp, unsigned int *free_fu);

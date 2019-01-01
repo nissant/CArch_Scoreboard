@@ -63,8 +63,9 @@ void read_mem(FILE *fp_memin, int *lst_line) {
 }
 
 int read_config(FILE *fp_config) {
-	int temp_num,cfg_count=0;
+	int temp_num,i,cfg_count=0;
 	char tmp_str[20];
+	char *ptr;
 
 	while (!feof(fp_config)) {
 		if (fscanf(fp_config, "%[^\n]\n", tmp_str) != 1)
@@ -180,6 +181,17 @@ int read_config(FILE *fp_config) {
 		}
 
 	}
+	// Parse trace_unit string
+	for (i = 0; i < FU_TYPES; i++) {
+		ptr = strstr(trace_unit, fu_names[i]);
+		if (ptr != NULL) {
+			trace_unit_opp = i;
+			ptr += strlen(fu_names[i]);
+			ptr = trimwhitespace(ptr);
+			trace_unit_index = (int)strtol(ptr, NULL, 10);
+		}
+	}
+
 	if (cfg_count == 13) {
 		//All expected lines where found and read
 		return 0;
@@ -252,9 +264,7 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 	unsigned int free_fu;
 	int i, n;
 
-	// Issue
-
-	// Try to issue one instruction as long as halt flag is not raised and instruction present in buffer
+	// Issue Phase - Try to issue one instruction as long as halt flag is not raised and instruction present in buffer
 	if (isEmpty(buffer) == false && haltFlag==false) {	// Check if possible to issue instruction or if halt opperation
 		next_inst = front(buffer);
 		parse_inst(&next_inst);
@@ -284,6 +294,16 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 				sb_b.fu_array[next_inst.opp][free_fu].r_k = true;
 			else
 				sb_b.fu_array[next_inst.opp][free_fu].r_k = false;
+
+			if (next_inst.opp == LD_OP) {
+				sb_b.fu_array[next_inst.opp][free_fu].r_j = true;
+				sb_b.fu_array[next_inst.opp][free_fu].r_k = true;
+			}
+
+			if (next_inst.opp == ST_OP) {
+				sb_b.fu_array[next_inst.opp][free_fu].r_j = true;
+			}
+
 			sb_b.reg_res_status[next_inst.dst] = sb_a.fu_array[next_inst.opp][free_fu].fu_sn;
 			next_inst.stage_cycle[ISSUE] = cc;
 			next_inst.issued_fu = free_fu;
@@ -300,8 +320,13 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 		return;
 	}
 
+	// Print to unit trace file if the unit is busy at this clock cycle
+	if (sb_a.fu_array[trace_unit_opp][trace_unit_index].busy) {
+		print_unit_trace(fp_trace_unit, cc);
+	}
+
 	// At this point, issued instruction are present in the scoreboard queue (begining of clock cycle - sb_a)
-	// Itterate over issued queue
+	// Itterate over issued queue and advance: Read Operand, Exec, Exec_End and Write results phases
 	for (n = 0; n < sb_a.issued_buffer->size; n++) {
 		i = (sb_a.issued_buffer->front + n) % sb_a.issued_buffer->capacity;
 		//printf("%X \n", sb_a.issued_buffer->inst_array[i].raw_inst);
@@ -317,25 +342,24 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 			}
 		}
 		else if (next_inst.stage_cycle[EXEC_END] == -1) {	// Instruction is waiting to finish execution stage
-			if (sb_b.fu_array[next_inst.opp][next_inst.issued_fu].remaining_cycles == 0) {
+			sb_b.fu_array[next_inst.opp][next_inst.issued_fu].remaining_cycles--;
+			if (sb_b.fu_array[next_inst.opp][next_inst.issued_fu].remaining_cycles <= 0) {
 				sb_b.issued_buffer->inst_array[i].stage_cycle[EXEC_END] = cc;						// log cycle
-			}
-			else {
-				sb_b.fu_array[next_inst.opp][next_inst.issued_fu].remaining_cycles--;				// decrement cycle counter
 			}
 		}
 		else if (next_inst.stage_cycle[WRITE_RES] == -1) {	// Instruction is waiting to write results and graduate
 			// Check conditions and write results
 			if (check_free2write_res(sb_a.fu_array[next_inst.opp][next_inst.issued_fu].fu_sn)) {
 				// Write results phase
-				sb_b.issued_buffer->inst_array[i].stage_cycle[WRITE_RES] = cc;
 				if (next_inst.opp == ST_OP) {
-					mem[next_inst.imm] = sb_a.fu_array[next_inst.opp][next_inst.issued_fu].result;
+					memcpy(&mem[next_inst.imm], &sb_a.fu_array[next_inst.opp][next_inst.issued_fu].result,sizeof(float));
+					//mem[next_inst.imm] = (unsigned int)sb_a.fu_array[next_inst.opp][next_inst.issued_fu].result;
 				}
 				else {
 					regs[next_inst.dst] = sb_a.fu_array[next_inst.opp][next_inst.issued_fu].result;
 				}
 				// Update s.b clean up fu and reset fields
+				sb_b.issued_buffer->inst_array[i].stage_cycle[WRITE_RES] = cc;
 				sb_b.fu_array[next_inst.opp][next_inst.issued_fu].busy = false;
 				sb_b.fu_array[next_inst.opp][next_inst.issued_fu].remaining_cycles = fu_const_data[next_inst.opp].delay_cycles;
 				sb_b.reg_res_status[next_inst.dst] = -1;
@@ -347,9 +371,30 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 	// Check if top instruction queue has graduated 
 	next_inst = front(sb_b.issued_buffer);
 	if (next_inst.stage_cycle[WRITE_RES] > -1) {
-		fprintf(fp_trace_inst, "%08X\n", next_inst.raw_inst);
+		//instruction pc unit cycle issued cycle read operands cycle execute end cycle write result
+		fprintf(fp_trace_inst, "%08X %d %s %d %d %d %d\n", next_inst.raw_inst, next_inst.pc, fu_names[next_inst.opp], next_inst.stage_cycle[ISSUE],next_inst.stage_cycle[READ_OP], next_inst.stage_cycle[EXEC_END], next_inst.stage_cycle[WRITE_RES]);
 		dequeue(sb_b.issued_buffer);
 	}
+}
+
+void print_unit_trace(FILE *fp_trace_unit, unsigned int cc) {
+	
+	char Rj[3],Rk[3];
+	char Qj[UNIT_NAME_SIZE], Qk[UNIT_NAME_SIZE];
+	if (sb_a.fu_array[trace_unit_opp][trace_unit_index].r_j) {
+		strcat(Qj, "Yes");
+	}
+	else {
+		strcat(Qj, "No");
+	}
+	if (sb_a.fu_array[trace_unit_opp][trace_unit_index].r_k) {
+		strcat(Qk, "Yes");
+	}
+	else {
+		strcat(Qk, "No");
+	}
+	//cycle unit Fi Fj Fk Qj Qk Rj Rk
+	fprintf(fp_trace_unit, "%d %s F%d F%d F%d %d %d %s %s\n", cc, trace_unit, sb_a.fu_array[trace_unit_opp][trace_unit_index].f_i, sb_a.fu_array[trace_unit_opp][trace_unit_index].f_j, sb_a.fu_array[trace_unit_opp][trace_unit_index].f_k, sb_a.fu_array[trace_unit_opp][trace_unit_index].q_j, sb_a.fu_array[trace_unit_opp][trace_unit_index].q_k, Qj, Qk);
 }
 
 void update_res_ready(int fu_sn) {
@@ -357,13 +402,17 @@ void update_res_ready(int fu_sn) {
 	// Itterate over FU's 
 	for (i = 0; i < FU_TYPES; i++) {
 		for (j = 0; j < fu_const_data[i].available; j++) {
-			if (sb_a.fu_array[i][j].q_j == fu_sn) {
-				sb_b.fu_array[i][j].r_j == true;	// Update r_j
+			if (sb_a.fu_array[i][j].q_j == fu_sn || sb_b.fu_array[i][j].q_j == fu_sn) {
+				sb_b.fu_array[i][j].r_j = true;		// Update r_j
+				//sb_a.fu_array[i][j].r_j = true;		// Update r_j
 				sb_b.fu_array[i][j].q_j = -1;		// Delete q_j
+				//sb_a.fu_array[i][j].q_j = -1;		// Delete q_j
 			}
-			if (sb_a.fu_array[i][j].q_k == fu_sn) {
-				sb_b.fu_array[i][j].r_k == true;	// Update r_k
+			if (sb_a.fu_array[i][j].q_k == fu_sn || sb_b.fu_array[i][j].q_k == fu_sn) {
+				sb_b.fu_array[i][j].r_k = true;		// Update r_k
+				//sb_a.fu_array[i][j].r_k = true;		// Update r_k
 				sb_b.fu_array[i][j].q_k = -1;		// Delete q_k
+				//sb_a.fu_array[i][j].q_k = -1;		// Delete q_k
 			}
 		}
 	}
@@ -396,9 +445,11 @@ void parse_inst(inst_status *next_inst) {
 }
 
 float execOpp(inst_status next_inst) {
+	float x;
 	switch (next_inst.opp) {
 	case (LD_OP):	// F[DST] = MEM[IMM]
-		return (mem[next_inst.imm]);
+		memcpy(&x, &mem[next_inst.imm], sizeof (float));
+		return x;
 		break;
 	case (ST_OP):	// MEM[IMM] = F[SRC1]
 		return (regs[next_inst.src1]);
@@ -416,6 +467,7 @@ float execOpp(inst_status next_inst) {
 		return (regs[next_inst.src0] / regs[next_inst.src1]);
 		break;
 	}
+	return;
 }
 
 bool availableFU(unsigned int opp,unsigned int *free_fu) {
@@ -428,160 +480,14 @@ bool availableFU(unsigned int opp,unsigned int *free_fu) {
 	}
 	return false;
 }
-/*
-// Check for IMM usage in command line
-if (rd == 1 || rs == 1 || rt == 1) {
-	R[$imm] = signExtension(mem[PC + 1]);
-	IMMflag = true;
-}
-else
-	R[$imm] = 0;
-// if IMM used then fetch it's value
-if (IMMflag) {
-	inst = (R[$imm] << 16) + inst;
-}
-// output to trace file
-fprintf(fp_trace, "%08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X\n", PC, inst, R[0], R[$imm], R[2], R[3], R[4], R[5], R[6], R[7], R[8], R[9], R[10], R[11], R[12], R[13], R[14], R[15]);
-
-// EXEC_ENDute command
-switch (op)
-{
-
-	//add
-case(OP_ADD):
-	R[rd] = R[rs] + R[rt];
-	break;
-
-	//sub
-case(OP_SUB):
-	R[rd] = R[rs] - R[rt];
-	break;
-
-	//and
-case(OP_AND):
-	R[rd] = R[rs] & R[rt];
-	break;
-
-	//or
-case(OP_OR):
-	R[rd] = R[rs] | R[rt];
-	break;
-
-	//sll
-case(OP_SLL):
-	R[rd] = R[rs] << R[rt];
-	break;
-
-	//sra
-case (OP_SRA):
-	R[rd] = ArithmetiShiftRight(R[rs], R[rt]);
-	break;
-
-	//Reserved
-case (OP_RSRV):
-	break;
-
-	//beq
-case(OP_BEQ):
-	if (R[rs] == R[rt]) {
-		if (IMMflag)
-			PC = R[$imm];  //If immidiate value present branch to that address, else branch to R[rd]
-		else
-			PC = R[rd];
-		PCFlag = true; // Jump to address imm, don't increment PC
-	}
-	break;
-
-	//bgt
-case(OP_BGT):
-	if (R[rs] > R[rt]) {
-		if (IMMflag)
-			PC = R[$imm];  //If immidiate value present branch to that address, else branch to R[rd]
-		else
-			PC = R[rd];
-		PCFlag = true; // Jump to address imm, don't increment PC
-	}
-
-	break;
-
-	//ble
-case(OP_BLE):
-	if (R[rs] <= R[rt]) {
-		if (IMMflag)
-			PC = R[$imm];  //If immidiate value present branch to that address, else branch to R[rd]
-		else
-			PC = R[rd];
-		PCFlag = true; // Jump to address imm, don't increment PC
-	}
-
-	break;
-
-	//bne
-case(OP_BNE):
-	if (R[rs] != R[rt]) {
-		if (IMMflag)
-			PC = R[$imm];  //If immidiate value present branch to that address, else branch to R[rd]
-		else
-			PC = R[rd];
-		PCFlag = true; // Jump to address imm, don't increment PC
-	}
-	break;
-
-	//jal - R[15] = next instruction address, pc = R[rd][15:0]
-case(OP_JAL):
-	if (IMMflag)
-		R[$ra] = PC + 2;
-	else
-		R[$ra] = PC + 1;
-	PC = R[$imm];
-	PCFlag = true;	// Jump to address imm, don't increment PC
-	break;
-
-	//lw	R[rd] = MEM[R[rs]+R[rt]], with sign extension
-case(OP_LW):
-	R[rd] = signExtension(mem[R[rs] + R[rt]]);
-	break;
-
-	//sw
-case(OP_SW):
-	mem[R[rs] + R[rt]] = bitSel(signExtension(R[rd]), 15, 0);
-	break;
-
-	//lhi R[rd][bits 31:16] = R[rs][low bits 15:0]
-case(OP_LHI):
-	R[rd] = R[rd] & 0x0000ffff;  // Mask the lower two bytes of R[rd]
-	R[rd] = R[rd] + (bitSel(R[rs], 15, 0) << 16);   //R[rd][bits 31:16] = R[rs][low bits 15:0]
-	break;
-
-	//halt
-case(OP_HALT):
-	haltFlag = true;
-	break;
-
-default:
-	break;
-}
-// Only if PC wasn't dange during this iteration It will increase by one.
-if (!PCFlag) {
-	PC++;
-	if (IMMflag) {
-		PC++;
-	}
-}
-else
-{
-	PCFlag = false;
-}
-IMMflag = false;
-count++;
-*/
 
 void scoreboard_update() {
-	int i;
+	int i,j;
 	// Update FU status
 	for (i = 0; i < FU_TYPES; i++) {
+		for(j=0;j<fu_const_data[i].available;j++)
 		//sb_a.fu_array[i] = sb_b.fu_array[i];
-		memcpy(sb_a.fu_array[i], sb_b.fu_array[i], sizeof(fu_status));
+		memcpy(&sb_a.fu_array[i][j], &sb_b.fu_array[i][j], sizeof(fu_status));
 	}
 
 	// Update instruction status in issue queue
@@ -590,7 +496,8 @@ void scoreboard_update() {
 	sb_a.issued_buffer->rear = sb_b.issued_buffer->rear;
 	sb_a.issued_buffer->size = sb_b.issued_buffer->size;
 	for (i = 0; i < sb_b.issued_buffer->capacity; i++) {
-		sb_a.issued_buffer->inst_array[i] = sb_b.issued_buffer->inst_array[i];
+		memcpy(&sb_a.issued_buffer->inst_array[i], &sb_b.issued_buffer->inst_array[i], sizeof(inst_status));
+		//sb_a.issued_buffer->inst_array[i] = sb_b.issued_buffer->inst_array[i];
 	}
 	// Update register results status
 	for (i = 0; i < REG_COUNT; i++) {
@@ -612,8 +519,8 @@ int scoreboard_init() {
 		fu_count += fu_const_data[i].available;
 		// Freee all fu's of type i
 		for (j = 0; j < fu_const_data[i].available; j++) {
-			sb_a.fu_array[i][j].remaining_cycles = fu_const_data->delay_cycles;
-			sb_b.fu_array[i][j].remaining_cycles = fu_const_data->delay_cycles;
+			sb_a.fu_array[i][j].remaining_cycles = fu_const_data[i].delay_cycles;
+			sb_b.fu_array[i][j].remaining_cycles = fu_const_data[i].delay_cycles;
 			sb_a.fu_array[i][j].busy = false;
 			sb_b.fu_array[i][j].busy = false;
 			sb_a.fu_array[i][j].fu_sn = fu_sn;
@@ -672,10 +579,9 @@ void print_memout_regout(FILE *fp_memout,FILE *fp_regout) {
 	// print on regout file.
 	for (i = 0; i < 16; i++)
 	{
-		fprintf(fp_regout, "%08X\n", regs[i]);
+		fprintf(fp_regout, "%d.%06X\n", i, regs[i]);
 	}
 }
-
 
 // Implementation of queue 
 
