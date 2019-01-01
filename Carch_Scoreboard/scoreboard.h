@@ -108,6 +108,7 @@ void scoreboard_free();
 float execOpp(inst_status next_inst);
 void update_res_ready(int fu_sn);
 void print_unit_trace(FILE *fp_trace_unit, unsigned int cc);
+void get_fu_name(int fu_sn,char *str);
 bool check_free2write_res(int fu_sn);
 void fetch_inst(unsigned int *pc);
 bool availableFU(unsigned int opp, unsigned int *free_fu);

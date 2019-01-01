@@ -379,24 +379,51 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 
 void print_unit_trace(FILE *fp_trace_unit, unsigned int cc) {
 	
-	char Rj[3],Rk[3];
-	char Qj[UNIT_NAME_SIZE], Qk[UNIT_NAME_SIZE];
+	char Rj[5],Rk[5];
+	char *Qj[UNIT_NAME_SIZE], *Qk[UNIT_NAME_SIZE];
 	if (sb_a.fu_array[trace_unit_opp][trace_unit_index].r_j) {
-		strcat(Qj, "Yes");
+		strcpy(Rj, "Yes\0");
 	}
 	else {
-		strcat(Qj, "No");
+		strcpy(Rj, "No\0");
 	}
 	if (sb_a.fu_array[trace_unit_opp][trace_unit_index].r_k) {
-		strcat(Qk, "Yes");
+		strcpy(Rk, "Yes\0");
 	}
 	else {
-		strcat(Qk, "No");
+		strcpy(Rk, "No\0");
+	}
+	if (sb_a.fu_array[trace_unit_opp][trace_unit_index].q_j == -1) {
+		strcpy(Qj, "-");
+	}
+	else {
+		get_fu_name(sb_a.fu_array[trace_unit_opp][trace_unit_index].q_j, Qj);
+	}
+
+	if (sb_a.fu_array[trace_unit_opp][trace_unit_index].q_k == -1) {
+		strcpy(Qk, "-");
+	}
+	else {
+		get_fu_name(sb_a.fu_array[trace_unit_opp][trace_unit_index].q_k, Qk);
 	}
 	//cycle unit Fi Fj Fk Qj Qk Rj Rk
-	fprintf(fp_trace_unit, "%d %s F%d F%d F%d %d %d %s %s\n", cc, trace_unit, sb_a.fu_array[trace_unit_opp][trace_unit_index].f_i, sb_a.fu_array[trace_unit_opp][trace_unit_index].f_j, sb_a.fu_array[trace_unit_opp][trace_unit_index].f_k, sb_a.fu_array[trace_unit_opp][trace_unit_index].q_j, sb_a.fu_array[trace_unit_opp][trace_unit_index].q_k, Qj, Qk);
+	fprintf(fp_trace_unit, "%d %s F%d F%d F%d %s %s %s %s\n", cc, trace_unit, sb_a.fu_array[trace_unit_opp][trace_unit_index].f_i, sb_a.fu_array[trace_unit_opp][trace_unit_index].f_j, sb_a.fu_array[trace_unit_opp][trace_unit_index].f_k, Qj, Qk, Rj, Rk);
 }
 
+void get_fu_name(int fu_sn, char *str) {
+	int i, j;
+	char snum[2];
+	// Itterate over FU's 
+	for (i = 0; i < FU_TYPES; i++) {
+		for (j = 0; j < fu_const_data[i].available; j++) {
+			if (sb_a.fu_array[i][j].fu_sn == fu_sn) {
+				strcpy(str, fu_names[i]);
+				itoa(j, snum, 10);
+				strcat(str, snum);
+			}
+		}
+	}
+}
 void update_res_ready(int fu_sn) {
 	int i, j;
 	// Itterate over FU's 
@@ -525,6 +552,10 @@ int scoreboard_init() {
 			sb_b.fu_array[i][j].busy = false;
 			sb_a.fu_array[i][j].fu_sn = fu_sn;
 			sb_b.fu_array[i][j].fu_sn = fu_sn;
+			//sb_a.fu_array[i][j].fu_opp = i;
+			//sb_a.fu_array[i][j].fu_index = j;
+			//sb_b.fu_array[i][j].fu_opp = i;
+			//sb_.fu_array[i][j].fu_index = j;
 			fu_sn++;
 		}
 	}
