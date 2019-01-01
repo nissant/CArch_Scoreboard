@@ -262,6 +262,8 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 	// TODO - Concider implememnting the issued instructions list in a dynmically allocated array instead of queue....
 	inst_status next_inst;
 	unsigned int free_fu;
+	char tmp[UNIT_NAME_SIZE];
+	char snum[3];
 	int i, n;
 
 	// Issue Phase - Try to issue one instruction as long as halt flag is not raised and instruction present in buffer
@@ -372,7 +374,10 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 	next_inst = front(sb_b.issued_buffer);
 	if (next_inst.stage_cycle[WRITE_RES] > -1) {
 		//instruction pc unit cycle issued cycle read operands cycle execute end cycle write result
-		fprintf(fp_trace_inst, "%08X %d %s %d %d %d %d\n", next_inst.raw_inst, next_inst.pc, fu_names[next_inst.opp], next_inst.stage_cycle[ISSUE],next_inst.stage_cycle[READ_OP], next_inst.stage_cycle[EXEC_END], next_inst.stage_cycle[WRITE_RES]);
+		strcpy(tmp, fu_names[next_inst.opp]);
+		itoa(next_inst.issued_fu, snum, 10);
+		strcat(tmp, snum);
+		fprintf(fp_trace_inst, "%08x %d %s %d %d %d %d\n", next_inst.raw_inst, next_inst.pc, tmp, next_inst.stage_cycle[ISSUE],next_inst.stage_cycle[READ_OP], next_inst.stage_cycle[EXEC_END], next_inst.stage_cycle[WRITE_RES]);
 		dequeue(sb_b.issued_buffer);
 	}
 }
@@ -412,7 +417,7 @@ void print_unit_trace(FILE *fp_trace_unit, unsigned int cc) {
 
 void get_fu_name(int fu_sn, char *str) {
 	int i, j;
-	char snum[2];
+	char snum[3];
 	// Itterate over FU's 
 	for (i = 0; i < FU_TYPES; i++) {
 		for (j = 0; j < fu_const_data[i].available; j++) {
@@ -424,6 +429,7 @@ void get_fu_name(int fu_sn, char *str) {
 		}
 	}
 }
+
 void update_res_ready(int fu_sn) {
 	int i, j;
 	// Itterate over FU's 
@@ -595,7 +601,7 @@ void scoreboard_free() {
 }
 
 void print_memout_regout(FILE *fp_memout,FILE *fp_regout) {
-	int i,last;
+	int i,last, intpart;
 	// count the max row number of memout file.
 	last = MEM_SIZE - 1;
 	while (last >= 0 && mem[last] == 0)
@@ -604,13 +610,14 @@ void print_memout_regout(FILE *fp_memout,FILE *fp_regout) {
 	// print on memout file.
 	for (i = 0; i <= last + 1; i++)
 	{
-		fprintf(fp_memout, "%08X\n", mem[i]);
+		fprintf(fp_memout, "%08x\n", mem[i]);
 	}
 
 	// print on regout file.
 	for (i = 0; i < 16; i++)
 	{
-		fprintf(fp_regout, "%d.%06X\n", i, regs[i]);
+		//intpart = (int)regs[i];
+		fprintf(fp_regout, "%.6f\n", regs[i]);
 	}
 }
 
