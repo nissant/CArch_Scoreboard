@@ -273,43 +273,51 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 		if (next_inst.opp == HALT_OP) {
 			haltFlag = true; // TODO - Raise flag only when all remaining instructions graduated
 		}
-		if (availableFU(next_inst.opp, &free_fu) && sb_a.reg_res_status[next_inst.dst] == -1) {	
+		if (availableFU(next_inst.opp, &free_fu) && (sb_a.reg_res_status[next_inst.dst] == -1 || next_inst.opp == ST_OP)) {
 			// Issue procedure...
-			sb_b.fu_array[next_inst.opp][free_fu].busy = true;		
-			sb_b.fu_array[next_inst.opp][free_fu].f_i = next_inst.dst;
-			if (next_inst.opp == LD_OP || next_inst.opp == ST_OP) {
-				sb_b.fu_array[next_inst.opp][free_fu].f_j = -1;
-				sb_b.fu_array[next_inst.opp][free_fu].f_k = -1;
-			}
-			else {
-				sb_b.fu_array[next_inst.opp][free_fu].f_j = next_inst.src0;
-				sb_b.fu_array[next_inst.opp][free_fu].f_k = next_inst.src1;
-			}
-			sb_b.fu_array[next_inst.opp][free_fu].q_j = sb_a.reg_res_status[next_inst.src0];
-			sb_b.fu_array[next_inst.opp][free_fu].q_k = sb_a.reg_res_status[next_inst.src1];
-			if (sb_a.reg_res_status[next_inst.src0] == -1)		// If no fu is assigned for writing to j source, it is assigned for read opperands stage
-				sb_b.fu_array[next_inst.opp][free_fu].r_j = true;
-			else
-				sb_b.fu_array[next_inst.opp][free_fu].r_j = false;
-
-			if (sb_a.reg_res_status[next_inst.src1] == -1)		// If no fu is assigned for writing to k source, it is assigned for read opperands stage
-				sb_b.fu_array[next_inst.opp][free_fu].r_k = true;
-			else
-				sb_b.fu_array[next_inst.opp][free_fu].r_k = false;
-
-			if (next_inst.opp == LD_OP) {
-				sb_b.fu_array[next_inst.opp][free_fu].r_j = true;
-				sb_b.fu_array[next_inst.opp][free_fu].r_k = true;
-			}
-
-			if (next_inst.opp == ST_OP) {
-				sb_b.fu_array[next_inst.opp][free_fu].r_j = true;
-			}
-
-			sb_b.reg_res_status[next_inst.dst] = sb_a.fu_array[next_inst.opp][free_fu].fu_sn;
+			sb_b.fu_array[next_inst.opp][free_fu].busy = true;
 			next_inst.stage_cycle[ISSUE] = cc;
 			next_inst.issued_fu = free_fu;
+			if (next_inst.opp != ST_OP)
+				sb_b.reg_res_status[next_inst.dst] = sb_a.fu_array[next_inst.opp][free_fu].fu_sn;
 
+			if (next_inst.opp == LD_OP) {		// F[DST] = MEM[IMM]
+				sb_b.fu_array[next_inst.opp][free_fu].f_i = next_inst.dst;
+				sb_b.fu_array[next_inst.opp][free_fu].f_j = -1;
+				sb_b.fu_array[next_inst.opp][free_fu].f_k = -1;
+				sb_b.fu_array[next_inst.opp][free_fu].q_j = -1;
+				sb_b.fu_array[next_inst.opp][free_fu].q_k = -1;
+				sb_b.fu_array[next_inst.opp][free_fu].r_j = true;
+				sb_b.fu_array[next_inst.opp][free_fu].r_k = true;
+			}
+			else if (next_inst.opp == ST_OP) {	// MEM[IMM] = F[SRC1]
+				sb_b.fu_array[next_inst.opp][free_fu].f_i = -1;
+				sb_b.fu_array[next_inst.opp][free_fu].f_j = -1;
+				sb_b.fu_array[next_inst.opp][free_fu].f_k = next_inst.src1;
+				sb_b.fu_array[next_inst.opp][free_fu].q_j = -1;
+				sb_b.fu_array[next_inst.opp][free_fu].q_k = sb_a.reg_res_status[next_inst.src1];
+				sb_b.fu_array[next_inst.opp][free_fu].r_j = true;
+				if (sb_a.reg_res_status[next_inst.src1] == -1)		// If no fu is assigned for writing to k source, it is assigned for read opperands stage
+					sb_b.fu_array[next_inst.opp][free_fu].r_k = true;
+				else
+					sb_b.fu_array[next_inst.opp][free_fu].r_k = false;
+			}
+			else {
+				sb_b.fu_array[next_inst.opp][free_fu].f_i = next_inst.dst;
+				sb_b.fu_array[next_inst.opp][free_fu].f_j = next_inst.src0;
+				sb_b.fu_array[next_inst.opp][free_fu].f_k = next_inst.src1;
+				sb_b.fu_array[next_inst.opp][free_fu].q_j = sb_a.reg_res_status[next_inst.src0];
+				sb_b.fu_array[next_inst.opp][free_fu].q_k = sb_a.reg_res_status[next_inst.src1];
+				if (sb_a.reg_res_status[next_inst.src0] == -1)		// If no fu is assigned for writing to j source, it is assigned for read opperands stage
+					sb_b.fu_array[next_inst.opp][free_fu].r_j = true;
+				else
+					sb_b.fu_array[next_inst.opp][free_fu].r_j = false;
+
+				if (sb_a.reg_res_status[next_inst.src1] == -1)		// If no fu is assigned for writing to k source, it is assigned for read opperands stage
+					sb_b.fu_array[next_inst.opp][free_fu].r_k = true;
+				else
+					sb_b.fu_array[next_inst.opp][free_fu].r_k = false;
+			}
 			enqueue(sb_b.issued_buffer,next_inst);
 			dequeue(buffer);
 		}
