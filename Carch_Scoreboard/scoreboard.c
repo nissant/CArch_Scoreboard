@@ -281,19 +281,17 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 			if (next_inst.opp != ST_OP)
 				sb_b.reg_res_status[next_inst.dst] = sb_a.fu_array[next_inst.opp][free_fu].fu_sn;
 
+			sb_b.fu_array[next_inst.opp][free_fu].f_i = next_inst.dst;
+			sb_b.fu_array[next_inst.opp][free_fu].f_j = next_inst.src0;
+			sb_b.fu_array[next_inst.opp][free_fu].f_k = next_inst.src1;
+
 			if (next_inst.opp == LD_OP) {		// F[DST] = MEM[IMM]
-				sb_b.fu_array[next_inst.opp][free_fu].f_i = next_inst.dst;
-				sb_b.fu_array[next_inst.opp][free_fu].f_j = -1;
-				sb_b.fu_array[next_inst.opp][free_fu].f_k = -1;
 				sb_b.fu_array[next_inst.opp][free_fu].q_j = -1;
 				sb_b.fu_array[next_inst.opp][free_fu].q_k = -1;
 				sb_b.fu_array[next_inst.opp][free_fu].r_j = true;
 				sb_b.fu_array[next_inst.opp][free_fu].r_k = true;
 			}
 			else if (next_inst.opp == ST_OP) {	// MEM[IMM] = F[SRC1]
-				sb_b.fu_array[next_inst.opp][free_fu].f_i = -1;
-				sb_b.fu_array[next_inst.opp][free_fu].f_j = -1;
-				sb_b.fu_array[next_inst.opp][free_fu].f_k = next_inst.src1;
 				sb_b.fu_array[next_inst.opp][free_fu].q_j = -1;
 				sb_b.fu_array[next_inst.opp][free_fu].q_k = sb_a.reg_res_status[next_inst.src1];
 				sb_b.fu_array[next_inst.opp][free_fu].r_j = true;
@@ -303,9 +301,6 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 					sb_b.fu_array[next_inst.opp][free_fu].r_k = false;
 			}
 			else {
-				sb_b.fu_array[next_inst.opp][free_fu].f_i = next_inst.dst;
-				sb_b.fu_array[next_inst.opp][free_fu].f_j = next_inst.src0;
-				sb_b.fu_array[next_inst.opp][free_fu].f_k = next_inst.src1;
 				sb_b.fu_array[next_inst.opp][free_fu].q_j = sb_a.reg_res_status[next_inst.src0];
 				sb_b.fu_array[next_inst.opp][free_fu].q_k = sb_a.reg_res_status[next_inst.src1];
 				if (sb_a.reg_res_status[next_inst.src0] == -1)		// If no fu is assigned for writing to j source, it is assigned for read opperands stage
@@ -339,11 +334,14 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 	// Itterate over issued queue and advance: Read Operand, Exec, Exec_End and Write results phases
 	for (n = 0; n < sb_a.issued_buffer->size; n++) {
 		i = (sb_a.issued_buffer->front + n) % sb_a.issued_buffer->capacity;
-		//printf("%X \n", sb_a.issued_buffer->inst_array[i].raw_inst);
 		next_inst = sb_a.issued_buffer->inst_array[i];
 		
 		if (next_inst.stage_cycle[READ_OP] == -1) {			// Instruction is waiting for READ_OP & Execution start stage
-			if (sb_a.fu_array[next_inst.opp][next_inst.issued_fu].r_j &&sb_a.fu_array[next_inst.opp][next_inst.issued_fu].r_k) {
+			if (next_inst.opp == LD_OP || next_inst.opp == ST_OP) { // Check that target memeoy cell is not dirty before allowing load/store opp
+				if (isMemDirty(next_inst))
+					continue;
+			}
+			if (sb_a.fu_array[next_inst.opp][next_inst.issued_fu].r_j &&sb_a.fu_array[next_inst.opp][next_inst.issued_fu].r_k) { // Check operands ready for reading
 				sb_b.issued_buffer->inst_array[i].stage_cycle[READ_OP] = cc;						// log cycle
 				sb_b.fu_array[next_inst.opp][next_inst.issued_fu].r_j = false;						// log s.b
 				sb_b.fu_array[next_inst.opp][next_inst.issued_fu].r_k = false;						// log s.b
@@ -363,7 +361,6 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 				// Write results phase
 				if (next_inst.opp == ST_OP) {
 					memcpy(&mem[next_inst.imm], &sb_a.fu_array[next_inst.opp][next_inst.issued_fu].result,sizeof(float));
-					//mem[next_inst.imm] = (unsigned int)sb_a.fu_array[next_inst.opp][next_inst.issued_fu].result;
 				}
 				else {
 					regs[next_inst.dst] = sb_a.fu_array[next_inst.opp][next_inst.issued_fu].result;
@@ -475,6 +472,24 @@ bool check_free2write_res(int fu_sn) {
 	return true;
 }
 
+bool isMemDirty(inst_status inst) {
+	int n, i;
+	inst_status next_inst;
+
+	// Itterate over issued instruction queue
+	for (n = 0; n < sb_b.issued_buffer->size; n++) {
+		i = (sb_b.issued_buffer->front + n) % sb_a.issued_buffer->capacity;
+		next_inst = sb_b.issued_buffer->inst_array[i];
+		
+		if (next_inst.opp == ST_OP && next_inst.stage_cycle[READ_OP] != -1 && next_inst.imm == inst.imm) {	//&& next_inst.stage_cycle[READ_OP] != -1
+			// A more mature store instruction is already writing to the same cell. MEM[IMM] = F[SRC1]
+			return true;
+		}
+	}
+	return false;
+}
+
+
 void parse_inst(inst_status *next_inst) {
 	unsigned int temp;
 	temp = next_inst->raw_inst;
@@ -566,10 +581,6 @@ int scoreboard_init() {
 			sb_b.fu_array[i][j].busy = false;
 			sb_a.fu_array[i][j].fu_sn = fu_sn;
 			sb_b.fu_array[i][j].fu_sn = fu_sn;
-			//sb_a.fu_array[i][j].fu_opp = i;
-			//sb_a.fu_array[i][j].fu_index = j;
-			//sb_b.fu_array[i][j].fu_opp = i;
-			//sb_.fu_array[i][j].fu_index = j;
 			fu_sn++;
 		}
 	}

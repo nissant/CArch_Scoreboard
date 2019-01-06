@@ -105,12 +105,13 @@ void scoreboard_clk(unsigned int cc, bool *exitFlag_ptr, FILE *fp_trace_inst, FI
 void scoreboard_update();
 int scoreboard_init();
 void scoreboard_free();
+void fetch_inst(unsigned int *pc);
 float execOpp(inst_status next_inst);
 void update_res_ready(int fu_sn);
 void print_unit_trace(FILE *fp_trace_unit, unsigned int cc);
 void get_fu_name(int fu_sn,char *str);
 bool check_free2write_res(int fu_sn);
-void fetch_inst(unsigned int *pc);
+bool isMemDirty(inst_status inst);
 bool availableFU(unsigned int opp, unsigned int *free_fu);
 void read_mem(FILE *fp_memin, int *lst_line);
 int read_config(FILE *fp_config);
