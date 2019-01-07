@@ -480,8 +480,7 @@ bool isMemDirty(inst_status inst) {
 	for (n = 0; n < sb_b.issued_buffer->size; n++) {
 		i = (sb_b.issued_buffer->front + n) % sb_a.issued_buffer->capacity;
 		next_inst = sb_b.issued_buffer->inst_array[i];
-		
-		if (next_inst.opp == ST_OP && next_inst.stage_cycle[READ_OP] != -1 && next_inst.imm == inst.imm) {	//&& next_inst.stage_cycle[READ_OP] != -1
+		if (next_inst.opp == ST_OP && (next_inst.stage_cycle[READ_OP] != -1 && next_inst.stage_cycle[WRITE_RES] == -1) && next_inst.imm == inst.imm) {	//&& next_inst.stage_cycle[READ_OP] != -1
 			// A more mature store instruction is already writing to the same cell. MEM[IMM] = F[SRC1]
 			return true;
 		}
